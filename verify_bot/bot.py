@@ -600,22 +600,6 @@ class VerifyBot(commands.Bot):
                 await _notify_mods(self, interaction, mat, student, "wrong speciality")
                 return
 
-            if not student.is_admis:
-                await _apply_role(interaction, unverified_role)
-                log_verification(
-                    uid, uname, dname, mat,
-                    full_name=student.full_name, section=student.section,
-                    td=student.groupe_td, tp=student.groupe_tp,
-                    status="NOT_ADMIS",
-                )
-                etat_label = ETAT_LABELS.get(student.etat.upper(), student.etat)
-                await interaction.response.send_message(
-                    f"`{mat}` matches **{student.full_name}** but their status is **{etat_label}**.\n"
-                    "Only **Admis (ADM)** students are verified. Please contact the administration.",
-                )
-                await _notify_mods(self, interaction, mat, student, f"etat={student.etat}")
-                return
-
             role_ok = await _apply_role(interaction, verified_role)
 
             unverified = discord.utils.get(interaction.guild.roles, name=unverified_role)
