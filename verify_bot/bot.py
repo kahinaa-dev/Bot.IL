@@ -14,7 +14,7 @@ from discord.ext import commands, tasks
 
 from students import load_students
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(os.environ.get("DATA_DIR") or Path(__file__).resolve().parent)
 CONFIG_PATH = BASE_DIR / "config.json"
 VERIFIED_PATH = BASE_DIR / "verified.json"
 VERIFY_LOG_PATH = BASE_DIR / "verify_log.csv"

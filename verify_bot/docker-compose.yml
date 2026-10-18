@@ -1,0 +1,8 @@
+services:
+  bot:
+    build: .
+    container_name: il-verify-bot
+    restart: unless-stopped
+    volumes:
+      # config.json, the xlsx, verified.json, verify_log.csv and reminders.json live here
+      - ./:/data
