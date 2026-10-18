@@ -140,11 +140,11 @@ def log_verification(user_id: int, username: str, display_name: str, matricule: 
         log.warning("Could not write verify_log.csv: %s", exc)
 
 
-def _all_td_groups(students: dict) -> list:
+def _all_td_groups(students: dict, attr: str = "groupe_td") -> list:
     td = set()
     for s in students.values():
-        if s.is_IL and s.groupe_td:
-            td.add(s.groupe_td)
+        if s.is_IL and getattr(s, attr).isdigit():  # skip blanks and "?" placeholders
+            td.add(getattr(s, attr))
     return sorted(td, key=lambda x: (len(x), x))
 
 
@@ -194,11 +194,11 @@ async def _apply_role(interaction: discord.Interaction, role_name: str) -> bool:
         return False
 
 
-async def _set_td_group_role(bot, member: discord.Member, td_group: str):
+async def _set_td_group_role(bot, member: discord.Member, td_group: str, fmt: str = None):
     if not td_group:
         return None
 
-    fmt = bot.config.get("group_role_format", "G{group}")
+    fmt = fmt or bot.config.get("group_role_format", "G{group}")
     target_name = fmt.format(group=td_group)
     target_role = discord.utils.get(member.guild.roles, name=target_name)
 
@@ -387,7 +387,7 @@ class VerifyBot(commands.Bot):
                 return
 
             content = message.content.strip()
-            if not content.isdigit():
+            if not content.isalnum():
                 state["strikes"] = [
                     t for t in state["strikes"] if now - t < STRIKE_WINDOW_SECONDS
                 ]
@@ -545,8 +545,8 @@ class VerifyBot(commands.Bot):
             uname = str(interaction.user)
             dname = getattr(interaction.user, "display_name", str(interaction.user))
 
-            mat = matricule.strip().replace(" ", "")
-            if not mat.isdigit():
+            mat = matricule.strip().replace(" ", "").upper()
+            if not mat.isalnum():  # foreign students have letters, e.g. 22229DZA11131
                 await interaction.response.send_message(
                     "That doesn't look like a matricule. A matricule is a number (e.g. `222231378114`).",
                     ephemeral=True,
@@ -628,6 +628,10 @@ class VerifyBot(commands.Bot):
             group_role_assigned = None
             if isinstance(interaction.user, discord.Member) and student.groupe_td:
                 group_role_assigned = await _set_td_group_role(self, interaction.user, student.groupe_td)
+            tp_fmt = cfg.get("tp_role_format", "TP{group}")
+            tp_role_assigned = None
+            if isinstance(interaction.user, discord.Member) and student.groupe_tp:
+                tp_role_assigned = await _set_td_group_role(self, interaction.user, student.groupe_tp, tp_fmt)
 
             self.verified[str(uid)] = mat
             self.matricule_to_user[mat] = str(uid)
@@ -650,6 +654,13 @@ class VerifyBot(commands.Bot):
                 fmt = cfg.get("group_role_format", "G{group}")
                 group_note = (
                     f"\n*(Group role `{fmt.format(group=student.groupe_td)}` "
+                    "not created yet — ask an admin to run `/creer_roles_groupes`.)*"
+                )
+            if tp_role_assigned:
+                group_note += f"\nAssigned TP role: **{tp_role_assigned}**"
+            elif student.groupe_tp:
+                group_note += (
+                    f"\n*(TP role `{tp_fmt.format(group=student.groupe_tp)}` "
                     "not created yet — ask an admin to run `/creer_roles_groupes`.)*"
                 )
 
@@ -806,9 +817,9 @@ class VerifyBot(commands.Bot):
                     ephemeral=True,
                 )
                 return
-            mat = matricule.strip().replace(" ", "")
-            if not mat.isdigit():
-                await interaction.response.send_message("Please provide a numeric matricule.", ephemeral=True)
+            mat = matricule.strip().replace(" ", "").upper()
+            if not mat.isalnum():  # foreign students have letters, e.g. 22229DZA11131
+                await interaction.response.send_message("Please provide a valid matricule.", ephemeral=True)
                 return
             student = self.students.get(mat)
             if student is None:
@@ -1181,7 +1192,7 @@ class VerifyBot(commands.Bot):
 
         # --------- /creer_roles_groupes ---------
 
-        @self.tree.command(name="creer_roles_groupes", description="Create G1..Gn roles from the list (admin)")
+        @self.tree.command(name="creer_roles_groupes", description="Create TD (G1..Gn) and TP (TP1..TPn) roles from the list (admin)")
         async def creer_roles_groupes(interaction: discord.Interaction):
             if not _is_admin(self, interaction.user):
                 await interaction.response.send_message("You don't have permission to use this.", ephemeral=True)
@@ -1190,14 +1201,15 @@ class VerifyBot(commands.Bot):
             await interaction.response.defer(ephemeral=True)
 
             fmt = cfg.get("group_role_format", "G{group}")
-            groups = _all_td_groups(self.students)
-            if not groups:
-                await interaction.followup.send("No TD groups found in the student list.", ephemeral=True)
+            tp_fmt = cfg.get("tp_role_format", "TP{group}")
+            names = [fmt.format(group=g) for g in _all_td_groups(self.students)]
+            names += [tp_fmt.format(group=g) for g in _all_td_groups(self.students, "groupe_tp")]
+            if not names:
+                await interaction.followup.send("No TD/TP groups found in the student list.", ephemeral=True)
                 return
 
             created, already, failed = [], [], []
-            for g in groups:
-                name = fmt.format(group=g)
+            for name in names:
                 existing = discord.utils.get(interaction.guild.roles, name=name)
                 if existing:
                     already.append(name)
@@ -1365,9 +1377,9 @@ class VerifyBot(commands.Bot):
         @self.tree.command(name="check", description="Look up any matricule in the database")
         @app_commands.describe(matricule="Matricule to look up")
         async def check(interaction: discord.Interaction, matricule: str):
-            mat = matricule.strip().replace(" ", "")
-            if not mat.isdigit():
-                await interaction.response.send_message("Please provide a numeric matricule.", ephemeral=True)
+            mat = matricule.strip().replace(" ", "").upper()
+            if not mat.isalnum():  # foreign students have letters, e.g. 22229DZA11131
+                await interaction.response.send_message("Please provide a valid matricule.", ephemeral=True)
                 return
             student = self.students.get(mat)
             if student is None:
@@ -1490,11 +1502,13 @@ class VerifyBot(commands.Bot):
                     await user.add_roles(unverified_role_obj, reason=f"Unverified by {interaction.user}")
                     removed.append(f"+{unverified_role_obj.name}")
 
-                fmt = cfg.get("group_role_format", "G{group}")
-                prefix = fmt.split("{group}")[0] if "{group}" in fmt else "G"
+                prefixes = [
+                    f.split("{group}")[0]
+                    for f in (cfg.get("group_role_format", "G{group}"), cfg.get("tp_role_format", "TP{group}"))
+                ]
                 group_roles = [
                     r for r in user.roles
-                    if r.name.startswith(prefix) and r.name[len(prefix):].isdigit()
+                    if any(r.name.startswith(p) and r.name[len(p):].isdigit() for p in prefixes)
                 ]
                 if group_roles:
                     await user.remove_roles(*group_roles, reason=f"Unverified by {interaction.user}")

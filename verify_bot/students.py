@@ -25,7 +25,8 @@ class Student:
 
     @property
     def is_admis(self) -> bool:
-        return (self.etat or "").strip().upper() == "ADM"
+        # the IL list leaves Etat blank for regular students; only explicit codes (TRFU, RNTG...) block
+        return (self.etat or "").strip().upper() in ("", "ADM")
 
 
 def load_students(path: str) -> dict[str, Student]:
